@@ -6,3 +6,5 @@ data/uploads/*
 !data/uploads/.gitkeep
 .pytest_cache/
 .ruff_cache/
+data/sample_docs/*
+!data/sample_docs/.gitkeep
