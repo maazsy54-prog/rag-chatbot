@@ -1,0 +1,9 @@
+anthropic
+voyageai
+psycopg[binary]
+pgvector
+pymupdf4llm
+python-docx
+python-dotenv
+tiktoken
+pytest
