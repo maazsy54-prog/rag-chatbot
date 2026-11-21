@@ -10,8 +10,12 @@ from pathlib import Path
 import pytest
 from docx import Document
 
+import asyncio
+
+from app import retrieval
 from app.config import settings
 from app.db import connection
+from app.ingestion import pipeline
 from app.ingestion.errors import DatabaseUnavailableError
 
 
@@ -100,3 +104,43 @@ def make_docx(tmp_path: Path) -> Callable[[str], Path]:
         return path
 
     return build
+
+
+def make_word_doc(tmp_path: Path, name: str, sections: dict[str, str]) -> Path:
+    """Create a Word file with one level-2 heading and one paragraph per section."""
+    document = Document()
+    document.add_heading(name, level=1)
+    for heading, body in sections.items():
+        document.add_heading(heading, level=2)
+        document.add_paragraph(body)
+    path = tmp_path / f"{name}.docx"
+    document.save(path)
+    return path
+
+
+def ingest_sync(user_id: int, path: Path) -> int:
+    """Ingest a file for a user and return the new document id."""
+    return asyncio.run(pipeline.ingest_file(path, path.name, user_id)).id
+
+
+@pytest.fixture()
+def topic_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use topic-based fake embeddings for ingestion and for questions."""
+    monkeypatch.setattr(pipeline, "embed_texts", topic_embedder)
+    monkeypatch.setattr(retrieval, "embed_query", topic_query_embedder)
+
+
+@pytest.fixture()
+def handbook(db_user: int, tmp_path: Path, topic_embeddings: None) -> tuple[int, int]:
+    """A stored document with refund, travel and security sections; returns (user, doc id)."""
+    path = make_word_doc(
+        tmp_path,
+        "handbook",
+        {
+            "Refunds": "Refund requests are processed within fourteen days of the claim. " * 12,
+            "Travel": "Travel expenses need manager approval before any booking is made. " * 12
+            + "Reference code ZX-4417 applies to hotel bookings.",
+            "Security": "Security badges must be worn visibly inside every building. " * 12,
+        },
+    )
+    return db_user, ingest_sync(db_user, path)

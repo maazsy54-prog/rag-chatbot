@@ -68,5 +68,13 @@ class Settings:
     min_similarity: float = 0.20  # without a reranker: below this = "not in the documents"
     min_rerank_score: float = 0.10  # with a reranker: below this = "not in the documents"
 
+    # --- Generation and guardrails ---
+    llm_max_tokens: int = 800
+    # None = do not send a temperature (use the model default). Set 0.0 for the most repeatable answers.
+    llm_temperature: float | None = None
+    llm_timeout_seconds: float = 60.0
+    llm_max_retries: int = 3
+    max_question_chars: int = 1000
+
 
 settings = Settings()

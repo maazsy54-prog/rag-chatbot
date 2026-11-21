@@ -12,10 +12,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from docx import Document
 
 from app import retrieval
-from app.ingestion import pipeline, store
+from app.ingestion import store
 from app.retrieval import (
     RerankServiceError,
     RetrievalConfig,
@@ -25,49 +24,13 @@ from app.retrieval import (
     rerank_chunks,
     rrf_fuse,
 )
-from tests.conftest import topic_embedder, topic_query_embedder
+from tests.conftest import ingest_sync, make_word_doc
 
 PLAIN = RetrievalConfig(use_keyword=False, use_reranker=False)
 HYBRID = RetrievalConfig(use_keyword=True, use_reranker=False)
 
 
-@pytest.fixture(autouse=True)
-def _fake_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use topic-based fake embeddings for both ingestion and questions."""
-    monkeypatch.setattr(pipeline, "embed_texts", topic_embedder)
-    monkeypatch.setattr(retrieval, "embed_query", topic_query_embedder)
-
-
-def _make_doc(tmp_path: Path, name: str, sections: dict[str, str]) -> Path:
-    """Create a Word file with one heading + paragraph per section."""
-    document = Document()
-    document.add_heading(name, level=1)
-    for heading, body in sections.items():
-        document.add_heading(heading, level=2)
-        document.add_paragraph(body)
-    path = tmp_path / f"{name}.docx"
-    document.save(path)
-    return path
-
-
-def _ingest(user_id: int, path: Path) -> int:
-    return asyncio.run(pipeline.ingest_file(path, path.name, user_id)).id
-
-
-@pytest.fixture()
-def handbook(db_user: int, tmp_path: Path) -> tuple[int, int]:
-    """A stored document with refund, travel and security sections; returns (user, doc id)."""
-    path = _make_doc(
-        tmp_path,
-        "handbook",
-        {
-            "Refunds": "Refund requests are processed within fourteen days of the claim. " * 12,
-            "Travel": "Travel expenses need manager approval before any booking is made. " * 12
-            + "Reference code ZX-4417 applies to hotel bookings.",
-            "Security": "Security badges must be worn visibly inside every building. " * 12,
-        },
-    )
-    return db_user, _ingest(db_user, path)
+pytestmark = pytest.mark.usefixtures("topic_embeddings")
 
 
 # ---------- pure functions ----------
@@ -196,7 +159,7 @@ def test_other_users_documents_are_never_returned(
 ) -> None:
     owner, _ = handbook
     outsider = user_factory()
-    _ingest(outsider, _make_doc(tmp_path, "secret", {"Refunds": "Secret refund formula alpha. " * 20}))
+    ingest_sync(outsider, make_word_doc(tmp_path, "secret", {"Refunds": "Secret refund formula alpha. " * 20}))
     mine = asyncio.run(retrieve("refund", owner, config=HYBRID))
     theirs = asyncio.run(retrieve("refund", outsider, config=HYBRID))
     assert {c.filename for c in mine.chunks} == {"handbook.docx"}
@@ -207,7 +170,7 @@ def test_search_can_be_limited_to_chosen_documents(
     handbook: tuple[int, int], tmp_path: Path
 ) -> None:
     user_id, handbook_id = handbook
-    other_id = _ingest(user_id, _make_doc(tmp_path, "other", {"Refunds": "Other refund rules apply. " * 20}))
+    other_id = ingest_sync(user_id, make_word_doc(tmp_path, "other", {"Refunds": "Other refund rules apply. " * 20}))
     only_other = asyncio.run(retrieve("refund", user_id, document_ids=[other_id], config=HYBRID))
     assert {c.document_id for c in only_other.chunks} == {other_id}
     nothing = asyncio.run(retrieve("refund", user_id, document_ids=[], config=HYBRID))
